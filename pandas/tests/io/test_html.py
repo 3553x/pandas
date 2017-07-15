@@ -3,12 +3,18 @@ from __future__ import print_function
 import glob
 import os
 import re
+import threading
 import warnings
 
 try:
     from importlib import import_module
 except ImportError:
     import_module = __import__
+
+try:
+    from importlib import reload
+except ImportError:
+    pass
 
 from distutils.version import LooseVersion
 
@@ -22,6 +28,7 @@ from pandas import (DataFrame, MultiIndex, read_csv, Timestamp, Index,
 from pandas.compat import (map, zip, StringIO, string_types, BytesIO,
                            is_platform_windows, PY3)
 from pandas.io.common import URLError, urlopen, file_path_to_url
+import pandas.io.html
 from pandas.io.html import read_html
 from pandas._libs.parsers import ParserError
 
@@ -931,3 +938,24 @@ def test_same_ordering():
     dfs_lxml = read_html(filename, index_col=0, flavor=['lxml'])
     dfs_bs4 = read_html(filename, index_col=0, flavor=['bs4'])
     assert_framelist_equal(dfs_lxml, dfs_bs4)
+
+class ErrorThread(threading.Thread):
+    def run(self):
+        try:
+            super(ErrorThread, self).run()
+        except Exception as e:
+            self.err = e
+        else:
+            self.err = None
+
+@pytest.mark.slow
+def test_importcheck_thread_safety():
+    reload(pandas.io.html)
+    filename = os.path.join(DATA_PATH, 'valid_markup.html')
+    helper_thread1 = ErrorThread(target = read_html, args = (filename,))
+    helper_thread2 = ErrorThread(target = read_html, args = (filename,))
+    helper_thread1.start()
+    helper_thread2.start()
+    while(helper_thread1.is_alive() or helper_thread2.is_alive()):
+        pass
+    assert None == helper_thread1.err == helper_thread2.err
